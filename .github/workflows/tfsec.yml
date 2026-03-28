@@ -1,4 +1,4 @@
-name: tfsec
+name: iac-security-scan
 
 on:
   pull_request:
@@ -8,15 +8,19 @@ permissions:
   contents: read
 
 jobs:
-  tfsec:
-    name: tfsec (high/critical)
+  trivy_config:
+    name: trivy config (high/critical)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run tfsec
-        uses: aquasecurity/tfsec-action@v1
+      - name: Trivy config scan (fail on HIGH/CRITICAL)
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
-          soft_fail: false
-          additional_args: --minimum-severity HIGH --force-all-dirs .
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          format: table
+          hide-progress: true
