@@ -1,0 +1,98 @@
+#!/bin/bash
+set -euo pipefail
+
+AWS_REGION="${aws_region}"
+ES_ENDPOINT="${es_endpoint}"
+SECRET_ES_CREDS="${es_creds_secret}"
+SECRET_CA_CERT="${ca_cert_secret}"
+SECRET_TLS="${kibana_tls_secret}"
+
+dnf -y update
+dnf -y install awscli jq unzip openssl amazon-cloudwatch-agent
+
+if [ ! -f /etc/yum.repos.d/elastic-8.x.repo ]; then
+  rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch
+  cat >/etc/yum.repos.d/elastic-8.x.repo <<'REPO'
+[elastic-8.x]
+name=Elastic repository for 8.x packages
+baseurl=https://artifacts.elastic.co/packages/8.x/yum
+gpgcheck=1
+gpgkey=https://artifacts.elastic.co/GPG-KEY-elasticsearch
+enabled=1
+autorefresh=1
+type=rpm-md
+REPO
+fi
+
+dnf -y install kibana
+
+mkdir -p /etc/kibana/certs /opt/siem
+chmod 750 /etc/kibana/certs
+
+CA_CERT_PEM="$(aws --region "$AWS_REGION" secretsmanager get-secret-value --secret-id "$SECRET_CA_CERT" --query SecretString --output text)"
+echo "$CA_CERT_PEM" >/etc/kibana/certs/ca.crt
+chmod 640 /etc/kibana/certs/ca.crt
+
+TLS_JSON="$(aws --region "$AWS_REGION" secretsmanager get-secret-value --secret-id "$SECRET_TLS" --query SecretString --output text)"
+echo "$TLS_JSON" | jq -r .crt >/etc/kibana/certs/kibana.crt
+echo "$TLS_JSON" | jq -r .key >/etc/kibana/certs/kibana.key
+chmod 640 /etc/kibana/certs/kibana.crt /etc/kibana/certs/kibana.key
+
+ES_CREDS_JSON="$(aws --region "$AWS_REGION" secretsmanager get-secret-value --secret-id "$SECRET_ES_CREDS" --query SecretString --output text)"
+KB_USER="$(echo "$ES_CREDS_JSON" | jq -r .user)"
+KB_PASS="$(echo "$ES_CREDS_JSON" | jq -r .password)"
+
+if [ ! -f /etc/kibana/siem-keys.env ]; then
+  ENC_KEY="$(openssl rand -hex 32)"
+  REP_KEY="$(openssl rand -hex 32)"
+  cat >/etc/kibana/siem-keys.env <<EOF
+ENCRYPTION_KEY=$ENC_KEY
+REPORTING_KEY=$REP_KEY
+EOF
+  chmod 600 /etc/kibana/siem-keys.env
+  chown root:root /etc/kibana/siem-keys.env
+fi
+
+source /etc/kibana/siem-keys.env
+
+cat >/etc/kibana/kibana.yml <<EOF
+server.port: 5601
+server.host: "0.0.0.0"
+server.ssl.enabled: true
+server.ssl.certificate: /etc/kibana/certs/kibana.crt
+server.ssl.key: /etc/kibana/certs/kibana.key
+
+elasticsearch.hosts: ["https://$ES_ENDPOINT:9200"]
+elasticsearch.username: "$KB_USER"
+elasticsearch.password: "$KB_PASS"
+elasticsearch.ssl.certificateAuthorities: ["/etc/kibana/certs/ca.crt"]
+
+xpack.security.enabled: true
+xpack.encryptedSavedObjects.encryptionKey: "$ENCRYPTION_KEY"
+xpack.reporting.encryptionKey: "$REPORTING_KEY"
+xpack.security.session.idleTimeout: "1h"
+logging.appenders.default.type: file
+logging.appenders.default.fileName: /var/log/kibana/kibana.log
+logging.root.appenders: [default]
+EOF
+
+mkdir -p /var/log/kibana
+chown -R kibana:kibana /var/log/kibana
+
+systemctl daemon-reload
+systemctl enable kibana
+systemctl restart kibana
+
+cat >/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'CWCFG'
+{
+  "metrics": {
+    "metrics_collected": {
+      "cpu": { "measurement": ["cpu_usage_idle","cpu_usage_iowait","cpu_usage_user","cpu_usage_system"], "metrics_collection_interval": 60, "totalcpu": true },
+      "mem": { "measurement": ["mem_used_percent"], "metrics_collection_interval": 60 },
+      "disk": { "measurement": ["used_percent"], "metrics_collection_interval": 60, "resources": ["*"] }
+    }
+  }
+}
+CWCFG
+
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s

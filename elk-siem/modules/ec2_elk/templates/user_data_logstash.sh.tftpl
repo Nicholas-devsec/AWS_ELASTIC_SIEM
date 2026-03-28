@@ -1,0 +1,133 @@
+#!/bin/bash
+set -euo pipefail
+
+AWS_REGION="${aws_region}"
+ES_ENDPOINT="${es_endpoint}"
+SECRET_ES_CREDS="${es_creds_secret}"
+SECRET_CA_CERT="${ca_cert_secret}"
+SECRET_TLS="${logstash_tls_secret}"
+
+dnf -y update
+dnf -y install awscli jq unzip openssl amazon-cloudwatch-agent
+
+if [ ! -f /etc/yum.repos.d/elastic-8.x.repo ]; then
+  rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch
+  cat >/etc/yum.repos.d/elastic-8.x.repo <<'REPO'
+[elastic-8.x]
+name=Elastic repository for 8.x packages
+baseurl=https://artifacts.elastic.co/packages/8.x/yum
+gpgcheck=1
+gpgkey=https://artifacts.elastic.co/GPG-KEY-elasticsearch
+enabled=1
+autorefresh=1
+type=rpm-md
+REPO
+fi
+
+dnf -y install logstash
+
+mkdir -p /etc/logstash/certs /etc/logstash/conf.d /opt/siem
+chmod 750 /etc/logstash/certs
+
+CA_CERT_PEM="$(aws --region "$AWS_REGION" secretsmanager get-secret-value --secret-id "$SECRET_CA_CERT" --query SecretString --output text)"
+echo "$CA_CERT_PEM" >/etc/logstash/certs/ca.crt
+chmod 640 /etc/logstash/certs/ca.crt
+
+TLS_JSON="$(aws --region "$AWS_REGION" secretsmanager get-secret-value --secret-id "$SECRET_TLS" --query SecretString --output text)"
+echo "$TLS_JSON" | jq -r .crt >/etc/logstash/certs/logstash.crt
+echo "$TLS_JSON" | jq -r .key >/etc/logstash/certs/logstash.key
+chmod 640 /etc/logstash/certs/logstash.crt /etc/logstash/certs/logstash.key
+
+ES_CREDS_JSON="$(aws --region "$AWS_REGION" secretsmanager get-secret-value --secret-id "$SECRET_ES_CREDS" --query SecretString --output text)"
+ES_USER="$(echo "$ES_CREDS_JSON" | jq -r .user)"
+ES_PASS="$(echo "$ES_CREDS_JSON" | jq -r .password)"
+
+cat >/etc/logstash/conf.d/siem.conf <<EOF
+input {
+  beats {
+    port => 5044
+    ssl => true
+    ssl_certificate => "/etc/logstash/certs/logstash.crt"
+    ssl_key => "/etc/logstash/certs/logstash.key"
+  }
+}
+
+filter {
+  if [type] == "syslog" {
+    grok { match => { "message" => "%%{SYSLOGTIMESTAMP:syslog_timestamp} %%{SYSLOGHOST:syslog_hostname} %%{DATA:syslog_program}: %%{GREEDYDATA:syslog_message}" } }
+    date { match => [ "syslog_timestamp", "MMM  d HH:mm:ss", "MMM dd HH:mm:ss" ] }
+  }
+  if [type] == "winlogbeat" {
+    mutate { add_field => { "[@metadata][index_prefix]" => "logs-windows" } }
+  }
+  if [type] == "cloudtrail" {
+    json { source => "message" }
+    mutate { add_field => { "[@metadata][index_prefix]" => "logs-cloudtrail" } }
+  }
+  geoip { source => "source.ip" target => "source.geo" }
+}
+
+output {
+  elasticsearch {
+    hosts => ["https://$ES_ENDPOINT:9200"]
+    user => "$ES_USER"
+    password => "$ES_PASS"
+    index => "%%{[@metadata][index_prefix]:logs-generic}-%%{+YYYY.MM.dd}"
+    ssl => true
+    cacert => "/etc/logstash/certs/ca.crt"
+  }
+}
+EOF
+
+systemctl daemon-reload
+systemctl enable logstash
+systemctl restart logstash
+
+cat >/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'CWCFG'
+{
+  "metrics": {
+    "metrics_collected": {
+      "cpu": { "measurement": ["cpu_usage_idle","cpu_usage_iowait","cpu_usage_user","cpu_usage_system"], "metrics_collection_interval": 60, "totalcpu": true },
+      "mem": { "measurement": ["mem_used_percent"], "metrics_collection_interval": 60 },
+      "disk": { "measurement": ["used_percent"], "metrics_collection_interval": 60, "resources": ["*"] }
+    }
+  }
+}
+CWCFG
+
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s
+
+cat >/opt/siem/publish_logstash_queue.sh <<'EOF'
+#!/bin/bash
+set -euo pipefail
+
+REGION="$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region)"
+DEPTH="$(curl -s http://127.0.0.1:9600/_node/stats/pipelines | jq '.pipelines | .. | objects | .queue? // empty | .events_count? // empty' | head -n1)"
+if [ -z "$DEPTH" ]; then DEPTH=0; fi
+aws --region "$REGION" cloudwatch put-metric-data --namespace "SIEM/Logstash" --metric-data "MetricName=QueueDepth,Value=$DEPTH,Unit=Count"
+EOF
+chmod 750 /opt/siem/publish_logstash_queue.sh
+
+cat >/etc/systemd/system/siem-logstash-queue-metric.service <<'EOF'
+[Unit]
+Description=Publish Logstash queue depth to CloudWatch
+
+[Service]
+Type=oneshot
+ExecStart=/opt/siem/publish_logstash_queue.sh
+EOF
+
+cat >/etc/systemd/system/siem-logstash-queue-metric.timer <<'EOF'
+[Unit]
+Description=Run Logstash queue metric publisher every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now siem-logstash-queue-metric.timer

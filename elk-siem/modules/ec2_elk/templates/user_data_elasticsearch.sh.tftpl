@@ -1,0 +1,175 @@
+#!/bin/bash
+set -euo pipefail
+
+AWS_REGION="${aws_region}"
+NODE_NAME="${node_name}"
+IS_MASTER="${is_master}"
+IS_DATA="${is_data}"
+AZ="${az}"
+SEED_HOSTS_JSON='${seed_hosts}'
+INITIAL_MASTERS_JSON='${initial_master_nodes}'
+
+SECRET_ELASTIC_PASSWORD="${elastic_master_password_secret}"
+SECRET_ES_TRANSPORT_P12="${es_transport_p12_secret}"
+SECRET_ES_TRANSPORT_P12_PASS="${es_transport_p12_password_secret}"
+SECRET_CA_CERT="${ca_cert_secret}"
+
+mkdir -p /opt/siem
+
+dnf -y update
+dnf -y install awscli jq unzip openssl amazon-cloudwatch-agent
+
+if [ ! -f /etc/yum.repos.d/elastic-8.x.repo ]; then
+  rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch
+  cat >/etc/yum.repos.d/elastic-8.x.repo <<'REPO'
+[elastic-8.x]
+name=Elastic repository for 8.x packages
+baseurl=https://artifacts.elastic.co/packages/8.x/yum
+gpgcheck=1
+gpgkey=https://artifacts.elastic.co/GPG-KEY-elasticsearch
+enabled=1
+autorefresh=1
+type=rpm-md
+REPO
+fi
+
+dnf -y install elasticsearch
+
+mkdir -p /etc/elasticsearch/certs
+chmod 750 /etc/elasticsearch/certs
+chown -R elasticsearch:elasticsearch /etc/elasticsearch
+
+if ! /usr/share/elasticsearch/bin/elasticsearch-plugin list | grep -q '^repository-s3$'; then
+  /usr/share/elasticsearch/bin/elasticsearch-plugin install --batch repository-s3
+fi
+
+ELASTIC_PASSWORD="$(aws --region "$AWS_REGION" secretsmanager get-secret-value --secret-id "$SECRET_ELASTIC_PASSWORD" --query SecretString --output text)"
+
+CA_CERT_PEM="$(aws --region "$AWS_REGION" secretsmanager get-secret-value --secret-id "$SECRET_CA_CERT" --query SecretString --output text)"
+echo "$CA_CERT_PEM" >/etc/elasticsearch/certs/ca.crt
+chmod 640 /etc/elasticsearch/certs/ca.crt
+chown elasticsearch:elasticsearch /etc/elasticsearch/certs/ca.crt
+
+P12_B64="$(aws --region "$AWS_REGION" secretsmanager get-secret-value --secret-id "$SECRET_ES_TRANSPORT_P12" --query SecretString --output text)"
+echo "$P12_B64" | base64 -d >/etc/elasticsearch/certs/elastic-certificates.p12
+chmod 640 /etc/elasticsearch/certs/elastic-certificates.p12
+chown elasticsearch:elasticsearch /etc/elasticsearch/certs/elastic-certificates.p12
+
+P12_PASS="$(aws --region "$AWS_REGION" secretsmanager get-secret-value --secret-id "$SECRET_ES_TRANSPORT_P12_PASS" --query SecretString --output text 2>/dev/null || true)"
+
+if [ ! -f /etc/elasticsearch/elasticsearch.yml ]; then
+  cat >/etc/elasticsearch/elasticsearch.yml <<EOF
+cluster.name: elk-siem
+node.name: ${node_name}
+node.master: ${is_master}
+node.data: ${is_data}
+node.attr.aws_availability_zone: ${az}
+
+network.host: 0.0.0.0
+discovery.seed_hosts: $SEED_HOSTS_JSON
+cluster.initial_master_nodes: $INITIAL_MASTERS_JSON
+
+cluster.routing.allocation.awareness.attributes: aws_availability_zone
+
+xpack.security.enabled: true
+
+xpack.security.transport.ssl.enabled: true
+xpack.security.transport.ssl.verification_mode: certificate
+xpack.security.transport.ssl.keystore.path: certs/elastic-certificates.p12
+xpack.security.transport.ssl.truststore.path: certs/elastic-certificates.p12
+
+xpack.security.http.ssl.enabled: true
+xpack.security.http.ssl.keystore.path: certs/elastic-certificates.p12
+xpack.security.http.ssl.truststore.path: certs/elastic-certificates.p12
+
+path.data: /var/lib/elasticsearch
+path.logs: /var/log/elasticsearch
+EOF
+  chown elasticsearch:elasticsearch /etc/elasticsearch/elasticsearch.yml
+  chmod 640 /etc/elasticsearch/elasticsearch.yml
+fi
+
+if [ ! -f /etc/elasticsearch/jvm.options.d/heap.options ]; then
+  mkdir -p /etc/elasticsearch/jvm.options.d
+  cat >/etc/elasticsearch/jvm.options.d/heap.options <<'EOF'
+-Xms4g
+-Xmx4g
+EOF
+  chown -R elasticsearch:elasticsearch /etc/elasticsearch/jvm.options.d
+fi
+
+if [ ! -f /etc/elasticsearch/elasticsearch.keystore ]; then
+  /usr/share/elasticsearch/bin/elasticsearch-keystore create
+  chown elasticsearch:elasticsearch /etc/elasticsearch/elasticsearch.keystore
+  chmod 600 /etc/elasticsearch/elasticsearch.keystore
+fi
+
+if ! /usr/share/elasticsearch/bin/elasticsearch-keystore list | grep -q '^bootstrap.password$'; then
+  echo "$ELASTIC_PASSWORD" | /usr/share/elasticsearch/bin/elasticsearch-keystore add -x 'bootstrap.password'
+fi
+
+if [ -n "$P12_PASS" ] && ! /usr/share/elasticsearch/bin/elasticsearch-keystore list | grep -q '^xpack.security.transport.ssl.keystore.secure_password$'; then
+  echo "$P12_PASS" | /usr/share/elasticsearch/bin/elasticsearch-keystore add -x 'xpack.security.transport.ssl.keystore.secure_password'
+  echo "$P12_PASS" | /usr/share/elasticsearch/bin/elasticsearch-keystore add -x 'xpack.security.transport.ssl.truststore.secure_password'
+  echo "$P12_PASS" | /usr/share/elasticsearch/bin/elasticsearch-keystore add -x 'xpack.security.http.ssl.keystore.secure_password'
+  echo "$P12_PASS" | /usr/share/elasticsearch/bin/elasticsearch-keystore add -x 'xpack.security.http.ssl.truststore.secure_password'
+fi
+
+systemctl daemon-reload
+systemctl enable elasticsearch
+systemctl restart elasticsearch
+
+cat >/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'CWCFG'
+{
+  "metrics": {
+    "metrics_collected": {
+      "cpu": { "measurement": ["cpu_usage_idle","cpu_usage_iowait","cpu_usage_user","cpu_usage_system"], "metrics_collection_interval": 60, "totalcpu": true },
+      "mem": { "measurement": ["mem_used_percent"], "metrics_collection_interval": 60 },
+      "disk": { "measurement": ["used_percent"], "metrics_collection_interval": 60, "resources": ["*"] }
+    }
+  }
+}
+CWCFG
+
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s
+
+cat >/opt/siem/publish_es_health.sh <<'EOF'
+#!/bin/bash
+set -euo pipefail
+
+REGION="$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region)"
+STATUS="$(curl -sk -u "elastic:$(aws --region "$REGION" secretsmanager get-secret-value --secret-id "siem/elasticsearch/master-password" --query SecretString --output text)" https://localhost:9200/_cluster/health | jq -r .status || echo "unknown")"
+VALUE=0
+case "$STATUS" in
+  green) VALUE=0 ;;
+  yellow) VALUE=1 ;;
+  red) VALUE=2 ;;
+  *) VALUE=3 ;;
+esac
+aws --region "$REGION" cloudwatch put-metric-data --namespace "SIEM/Elasticsearch" --metric-data "MetricName=ClusterHealth,Value=$VALUE,Unit=None"
+EOF
+chmod 750 /opt/siem/publish_es_health.sh
+
+cat >/etc/systemd/system/siem-es-health-metric.service <<'EOF'
+[Unit]
+Description=Publish Elasticsearch cluster health to CloudWatch
+
+[Service]
+Type=oneshot
+ExecStart=/opt/siem/publish_es_health.sh
+EOF
+
+cat >/etc/systemd/system/siem-es-health-metric.timer <<'EOF'
+[Unit]
+Description=Run Elasticsearch health metric publisher every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now siem-es-health-metric.timer

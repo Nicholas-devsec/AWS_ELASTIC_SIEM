@@ -1,0 +1,22 @@
+name: tfsec
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  tfsec:
+    name: tfsec (high/critical)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1
+        with:
+          soft_fail: false
+          additional_args: --minimum-severity HIGH --force-all-dirs .
