@@ -15,6 +15,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+## safe action version following aquasec breach
       - name: Trivy config scan (fail on HIGH/CRITICAL)
         uses: aquasecurity/trivy-action@v0.35.0
         with:
@@ -23,4 +24,12 @@ jobs:
           severity: HIGH,CRITICAL
           exit-code: "1"
           format: table
+          output: trivy-config-results.txt
           hide-progress: true
+
+      - name: Upload scan report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-config-results
+          path: trivy-config-results.txt

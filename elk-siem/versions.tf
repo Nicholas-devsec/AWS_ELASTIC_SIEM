@@ -12,7 +12,7 @@ terraform {
     }
   }
 
-  # Remote state backend (recommended):
+  # Remote state backend:
   # - Create via ../bootstrap first, then paste the backend config here.
   # backend "s3" {}
 }
