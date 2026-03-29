@@ -78,6 +78,10 @@ resource "aws_instance" "es_master" {
   vpc_security_group_ids = [var.sg_elasticsearch_id]
   iam_instance_profile   = var.es_instance_profile_name
 
+  metadata_options {
+    http_tokens = "required"
+  }
+
   root_block_device {
     volume_size = var.es_root_volume_gb
     volume_type = "gp3"
@@ -113,6 +117,10 @@ resource "aws_instance" "es_data" {
   subnet_id              = each.value.subnet_id
   vpc_security_group_ids = [var.sg_elasticsearch_id]
   iam_instance_profile   = var.es_instance_profile_name
+
+  metadata_options {
+    http_tokens = "required"
+  }
 
   root_block_device {
     volume_size = var.es_root_volume_gb
@@ -159,6 +167,10 @@ resource "aws_instance" "logstash" {
   vpc_security_group_ids = [var.sg_logstash_id]
   iam_instance_profile   = var.logstash_instance_profile_name
 
+  metadata_options {
+    http_tokens = "required"
+  }
+
   root_block_device {
     volume_size = var.logstash_root_volume_gb
     volume_type = "gp3"
@@ -186,6 +198,10 @@ resource "aws_instance" "kibana" {
   subnet_id              = local.kibana_node.subnet_id
   vpc_security_group_ids = [var.sg_kibana_id]
   iam_instance_profile   = var.kibana_instance_profile_name
+
+  metadata_options {
+    http_tokens = "required"
+  }
 
   root_block_device {
     volume_size = var.kibana_root_volume_gb

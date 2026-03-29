@@ -8,6 +8,17 @@ variable "aws_region" {
   description = "AWS region (used for restrictive KMS service conditions)."
 }
 
+variable "account_id" {
+  type        = string
+  description = "AWS account id (12 digits). If empty, derived via aws_caller_identity."
+  default     = ""
+
+  validation {
+    condition     = var.account_id == "" || can(regex("^[0-9]{12}$", var.account_id))
+    error_message = "account_id must be empty or a 12-digit AWS account id."
+  }
+}
+
 variable "project" {
   type        = string
   description = "Project name for tags."

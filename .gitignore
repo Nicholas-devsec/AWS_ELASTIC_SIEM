@@ -25,9 +25,14 @@ terraform.rc
 # Logs
 *.log
 
+# Trivy workflow outputs (generated in CI or locally)
+trivy-config-results.*
+
 # OS / editor
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
 
+trivy-config-results.txt
+IAC_SUMMARY.md

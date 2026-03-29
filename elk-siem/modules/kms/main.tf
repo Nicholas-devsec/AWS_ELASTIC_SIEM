@@ -1,5 +1,9 @@
 data "aws_caller_identity" "current" {}
 
+locals {
+  account_id = var.account_id != "" ? var.account_id : data.aws_caller_identity.current.account_id
+}
+
 data "aws_iam_policy_document" "key_policy" {
   statement {
     sid     = "EnableAccountRootPermissions"
@@ -8,7 +12,7 @@ data "aws_iam_policy_document" "key_policy" {
 
     principals {
       type        = "AWS"
-      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+      identifiers = ["arn:aws:iam::${local.account_id}:root"]
     }
 
     resources = ["*"]
@@ -53,7 +57,7 @@ data "aws_iam_policy_document" "key_policy" {
     condition {
       test     = "StringEquals"
       variable = "aws:PrincipalAccount"
-      values   = [data.aws_caller_identity.current.account_id]
+      values   = [local.account_id]
     }
   }
 

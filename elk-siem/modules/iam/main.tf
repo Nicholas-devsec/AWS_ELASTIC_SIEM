@@ -2,6 +2,7 @@ data "aws_caller_identity" "current" {}
 
 locals {
   snapshot_bucket_arn = "arn:aws:s3:::${var.snapshot_bucket_name}"
+  account_id          = var.account_id != "" ? var.account_id : data.aws_caller_identity.current.account_id
 }
 
 data "aws_iam_policy_document" "assume_ec2" {
@@ -87,8 +88,8 @@ data "aws_iam_policy_document" "logstash_inline" {
     effect  = "Allow"
     actions = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
     resources = [
-      "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:siem/logstash/*",
-      "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:siem/tls/*"
+      "arn:aws:secretsmanager:${var.aws_region}:${local.account_id}:secret:siem/logstash/*",
+      "arn:aws:secretsmanager:${var.aws_region}:${local.account_id}:secret:siem/tls/*"
     ]
   }
 }
@@ -105,8 +106,8 @@ data "aws_iam_policy_document" "kibana_inline" {
     effect  = "Allow"
     actions = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
     resources = [
-      "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:siem/kibana/*",
-      "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:siem/tls/*"
+      "arn:aws:secretsmanager:${var.aws_region}:${local.account_id}:secret:siem/kibana/*",
+      "arn:aws:secretsmanager:${var.aws_region}:${local.account_id}:secret:siem/tls/*"
     ]
   }
 
@@ -130,8 +131,8 @@ data "aws_iam_policy_document" "elasticsearch_inline" {
     effect  = "Allow"
     actions = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
     resources = [
-      "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:siem/elasticsearch/*",
-      "arn:aws:secretsmanager:${var.aws_region}:${data.aws_caller_identity.current.account_id}:secret:siem/tls/*"
+      "arn:aws:secretsmanager:${var.aws_region}:${local.account_id}:secret:siem/elasticsearch/*",
+      "arn:aws:secretsmanager:${var.aws_region}:${local.account_id}:secret:siem/tls/*"
     ]
   }
 
@@ -165,4 +166,3 @@ resource "aws_iam_role_policy" "elasticsearch_inline" {
   role   = aws_iam_role.elasticsearch.id
   policy = data.aws_iam_policy_document.elasticsearch_inline.json
 }
-

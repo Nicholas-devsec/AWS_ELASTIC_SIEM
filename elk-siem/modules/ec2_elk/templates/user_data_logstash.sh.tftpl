@@ -101,7 +101,8 @@ cat >/opt/siem/publish_logstash_queue.sh <<'EOF'
 #!/bin/bash
 set -euo pipefail
 
-REGION="$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region)"
+TOKEN="$(curl -sS -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")"
+REGION="$(curl -sS -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region)"
 DEPTH="$(curl -s http://127.0.0.1:9600/_node/stats/pipelines | jq '.pipelines | .. | objects | .queue? // empty | .events_count? // empty' | head -n1)"
 if [ -z "$DEPTH" ]; then DEPTH=0; fi
 aws --region "$REGION" cloudwatch put-metric-data --namespace "SIEM/Logstash" --metric-data "MetricName=QueueDepth,Value=$DEPTH,Unit=Count"

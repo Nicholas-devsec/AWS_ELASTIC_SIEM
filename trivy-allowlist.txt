@@ -1,0 +1,14 @@
+# Trivy config scan allowlist
+#
+# These items are explicitly allowed by the architecture:
+# - SIEM_ARCHITECTURE_PLAN.md: "All egress is open."
+# - SIEM_ARCHITECTURE_PLAN.md: public subnets intentionally assign public IPs.
+
+# SG egress open (intentional)
+AWS-0104
+AVD-AWS-0104
+
+# Public subnets map public IPs (intentional)
+AWS-0164
+AVD-AWS-0164
+

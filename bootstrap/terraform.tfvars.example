@@ -1,0 +1,11 @@
+# Example values for the bootstrap stack (remote state + lock table).
+# Copy to bootstrap/terraform.tfvars and fill in real values.
+
+environment      = "dev"
+state_bucket_name = "elk-siem-dev-tfstate-123456789012"
+
+# Optional overrides
+# aws_region       = "us-west-2"
+# project          = "elk-siem"
+# lock_table_name  = "terraform-locks"
+

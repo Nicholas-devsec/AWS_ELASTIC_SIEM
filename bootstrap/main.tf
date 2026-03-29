@@ -9,6 +9,23 @@ resource "aws_s3_bucket" "state" {
   }
 }
 
+resource "aws_kms_key" "tf_state" {
+  description             = "Terraform state bucket CMK (${var.project}/${var.environment})"
+  enable_key_rotation     = true
+  deletion_window_in_days = 30
+
+  tags = {
+    Name        = "${var.project}-${var.environment}-tf-state"
+    project     = var.project
+    environment = var.environment
+  }
+}
+
+resource "aws_kms_alias" "tf_state" {
+  name          = "alias/${var.project}-${var.environment}-tf-state"
+  target_key_id = aws_kms_key.tf_state.key_id
+}
+
 resource "aws_s3_bucket_public_access_block" "state" {
   bucket = aws_s3_bucket.state.id
 
@@ -31,7 +48,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "state" {
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "aws:kms"
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.tf_state.arn
     }
     bucket_key_enabled = true
   }
@@ -57,4 +75,3 @@ resource "aws_dynamodb_table" "lock" {
     environment = var.environment
   }
 }
-

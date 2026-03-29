@@ -161,8 +161,9 @@ resource "aws_flow_log" "to_s3" {
 }
 
 resource "aws_sns_topic" "alerts" {
-  name = "siem-alerts-${var.environment}"
-  tags = var.tags
+  name              = "siem-alerts-${var.environment}"
+  kms_master_key_id = var.kms_key_arn
+  tags              = var.tags
 }
 
 resource "aws_sns_topic_subscription" "email" {

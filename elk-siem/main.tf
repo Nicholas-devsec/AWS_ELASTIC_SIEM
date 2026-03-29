@@ -6,8 +6,10 @@ locals {
     environment = var.environment
   }
 
-  snapshot_bucket_name = "siem-es-snapshots-${var.environment}-${data.aws_caller_identity.current.account_id}"
-  vpc_flow_bucket_name = "siem-vpc-flow-logs-${var.environment}-${data.aws_caller_identity.current.account_id}"
+  account_id = var.account_id != "" ? var.account_id : data.aws_caller_identity.current.account_id
+
+  snapshot_bucket_name = "siem-es-snapshots-${var.environment}-${local.account_id}"
+  vpc_flow_bucket_name = "siem-vpc-flow-logs-${var.environment}-${local.account_id}"
   vpc_flow_bucket_arn  = "arn:aws:s3:::${local.vpc_flow_bucket_name}"
 }
 
@@ -148,6 +150,7 @@ module "alb" {
   vpc_id              = module.vpc.vpc_id
   public_subnet_ids   = module.vpc.public_subnet_ids
   allowed_analyst_ips = var.allowed_analyst_ips
+  acm_cert_arn        = var.acm_cert_arn
 
   kibana_instance_id = module.ec2_elk.kibana_instance_id
   sg_alb_id          = module.sg.sg_alb_id
