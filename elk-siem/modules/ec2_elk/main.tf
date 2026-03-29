@@ -90,17 +90,16 @@ resource "aws_instance" "es_master" {
   }
 
   user_data = templatefile("${path.module}/templates/user_data_elasticsearch.sh.tftpl", {
-    aws_region                       = var.aws_region
-    node_name                        = each.value.name
-    is_master                        = true
-    is_data                          = false
-    az                               = each.value.az
-    seed_hosts                       = jsonencode([for _, inst in aws_instance.es_master : inst.private_ip])
-    initial_master_nodes             = jsonencode(local.initial_master_nodes)
-    elastic_master_password_secret   = var.secret_names.elastic_master_password
-    es_transport_p12_secret          = var.secret_names.tls_es_transport_p12
-    es_transport_p12_password_secret = var.secret_names.tls_es_transport_p12_password
-    ca_cert_secret                   = var.secret_names.tls_ca_cert
+    aws_region                     = var.aws_region
+    node_name                      = each.value.name
+    is_master                      = true
+    is_data                        = false
+    az                             = each.value.az
+    seed_hosts                     = jsonencode([for _, inst in aws_instance.es_master : inst.private_ip])
+    initial_master_nodes           = jsonencode(local.initial_master_nodes)
+    elastic_master_password_secret = var.secret_names.elastic_master_password
+    es_tls_secret                  = var.secret_names.tls_elasticsearch_cert
+    ca_cert_secret                 = var.secret_names.tls_ca_cert
   })
 
   tags = merge(var.tags, {
@@ -138,17 +137,16 @@ resource "aws_instance" "es_data" {
   }
 
   user_data = templatefile("${path.module}/templates/user_data_elasticsearch.sh.tftpl", {
-    aws_region                       = var.aws_region
-    node_name                        = each.value.name
-    is_master                        = false
-    is_data                          = true
-    az                               = each.value.az
-    seed_hosts                       = jsonencode([for _, inst in aws_instance.es_master : inst.private_ip])
-    initial_master_nodes             = jsonencode(local.initial_master_nodes)
-    elastic_master_password_secret   = var.secret_names.elastic_master_password
-    es_transport_p12_secret          = var.secret_names.tls_es_transport_p12
-    es_transport_p12_password_secret = var.secret_names.tls_es_transport_p12_password
-    ca_cert_secret                   = var.secret_names.tls_ca_cert
+    aws_region                     = var.aws_region
+    node_name                      = each.value.name
+    is_master                      = false
+    is_data                        = true
+    az                             = each.value.az
+    seed_hosts                     = jsonencode([for _, inst in aws_instance.es_master : inst.private_ip])
+    initial_master_nodes           = jsonencode(local.initial_master_nodes)
+    elastic_master_password_secret = var.secret_names.elastic_master_password
+    es_tls_secret                  = var.secret_names.tls_elasticsearch_cert
+    ca_cert_secret                 = var.secret_names.tls_ca_cert
   })
 
   tags = merge(var.tags, {

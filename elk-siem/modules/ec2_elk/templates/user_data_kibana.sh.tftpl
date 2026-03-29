@@ -66,6 +66,7 @@ elasticsearch.hosts: ["https://$ES_ENDPOINT:9200"]
 elasticsearch.username: "$KB_USER"
 elasticsearch.password: "$KB_PASS"
 elasticsearch.ssl.certificateAuthorities: ["/etc/kibana/certs/ca.crt"]
+elasticsearch.ssl.verificationMode: certificate
 
 xpack.security.enabled: true
 xpack.encryptedSavedObjects.encryptionKey: "$ENCRYPTION_KEY"

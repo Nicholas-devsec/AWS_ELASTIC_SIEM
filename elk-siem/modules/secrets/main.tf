@@ -6,8 +6,7 @@ locals {
     "siem/tls/ca-cert",
     "siem/tls/logstash-cert",
     "siem/tls/kibana-cert",
-    "siem/tls/es-transport-p12",
-    "siem/tls/es-transport-p12-password"
+    "siem/tls/elasticsearch-cert"
   ]
 
   readers_by_prefix = {
@@ -55,3 +54,197 @@ resource "aws_secretsmanager_secret_policy" "this" {
   policy     = data.aws_iam_policy_document.secret_policy[each.key].json
 }
 
+resource "random_password" "elastic_master" {
+  length           = 32
+  special          = true
+  override_special = "_%@-"
+}
+
+resource "tls_private_key" "ca" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+resource "tls_self_signed_cert" "ca" {
+  private_key_pem = tls_private_key.ca.private_key_pem
+
+  subject {
+    common_name  = "siem-ca"
+    organization = var.project
+  }
+
+  is_ca_certificate     = true
+  validity_period_hours = 87600 # ~10 years
+
+  allowed_uses = [
+    "cert_signing",
+    "crl_signing",
+    "digital_signature",
+    "key_encipherment"
+  ]
+}
+
+resource "tls_private_key" "logstash" {
+  algorithm = "RSA"
+  rsa_bits  = 2048
+}
+
+resource "tls_cert_request" "logstash" {
+  private_key_pem = tls_private_key.logstash.private_key_pem
+
+  subject {
+    common_name  = "logstash"
+    organization = var.project
+  }
+}
+
+resource "tls_locally_signed_cert" "logstash" {
+  cert_request_pem      = tls_cert_request.logstash.cert_request_pem
+  ca_private_key_pem    = tls_private_key.ca.private_key_pem
+  ca_cert_pem           = tls_self_signed_cert.ca.cert_pem
+  validity_period_hours = 8760 # ~1 year
+
+  allowed_uses = [
+    "digital_signature",
+    "key_encipherment",
+    "server_auth",
+    "client_auth"
+  ]
+}
+
+resource "tls_private_key" "kibana" {
+  algorithm = "RSA"
+  rsa_bits  = 2048
+}
+
+resource "tls_cert_request" "kibana" {
+  private_key_pem = tls_private_key.kibana.private_key_pem
+
+  subject {
+    common_name  = "kibana"
+    organization = var.project
+  }
+}
+
+resource "tls_locally_signed_cert" "kibana" {
+  cert_request_pem      = tls_cert_request.kibana.cert_request_pem
+  ca_private_key_pem    = tls_private_key.ca.private_key_pem
+  ca_cert_pem           = tls_self_signed_cert.ca.cert_pem
+  validity_period_hours = 8760 # ~1 year
+
+  allowed_uses = [
+    "digital_signature",
+    "key_encipherment",
+    "server_auth",
+    "client_auth"
+  ]
+}
+
+resource "tls_private_key" "elasticsearch" {
+  algorithm = "RSA"
+  rsa_bits  = 2048
+}
+
+resource "tls_cert_request" "elasticsearch" {
+  private_key_pem = tls_private_key.elasticsearch.private_key_pem
+
+  subject {
+    common_name  = "elasticsearch"
+    organization = var.project
+  }
+
+  dns_names    = ["localhost"]
+  ip_addresses = ["127.0.0.1"]
+}
+
+resource "tls_locally_signed_cert" "elasticsearch" {
+  cert_request_pem      = tls_cert_request.elasticsearch.cert_request_pem
+  ca_private_key_pem    = tls_private_key.ca.private_key_pem
+  ca_cert_pem           = tls_self_signed_cert.ca.cert_pem
+  validity_period_hours = 8760 # ~1 year
+
+  allowed_uses = [
+    "digital_signature",
+    "key_encipherment",
+    "server_auth",
+    "client_auth"
+  ]
+}
+
+resource "aws_secretsmanager_secret_version" "elastic_master_password" {
+  secret_id     = aws_secretsmanager_secret.this["siem/elasticsearch/master-password"].id
+  secret_string = random_password.elastic_master.result
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "logstash_es_credentials" {
+  secret_id = aws_secretsmanager_secret.this["siem/logstash/es-credentials"].id
+  secret_string = jsonencode({
+    user     = "elastic"
+    password = random_password.elastic_master.result
+  })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "kibana_es_credentials" {
+  secret_id = aws_secretsmanager_secret.this["siem/kibana/es-credentials"].id
+  secret_string = jsonencode({
+    user     = "elastic"
+    password = random_password.elastic_master.result
+  })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "tls_ca_cert" {
+  secret_id     = aws_secretsmanager_secret.this["siem/tls/ca-cert"].id
+  secret_string = tls_self_signed_cert.ca.cert_pem
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "tls_logstash_cert" {
+  secret_id = aws_secretsmanager_secret.this["siem/tls/logstash-cert"].id
+  secret_string = jsonencode({
+    crt = tls_locally_signed_cert.logstash.cert_pem
+    key = tls_private_key.logstash.private_key_pem
+  })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "tls_kibana_cert" {
+  secret_id = aws_secretsmanager_secret.this["siem/tls/kibana-cert"].id
+  secret_string = jsonencode({
+    crt = tls_locally_signed_cert.kibana.cert_pem
+    key = tls_private_key.kibana.private_key_pem
+  })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "tls_elasticsearch_cert" {
+  secret_id = aws_secretsmanager_secret.this["siem/tls/elasticsearch-cert"].id
+  secret_string = jsonencode({
+    crt = tls_locally_signed_cert.elasticsearch.cert_pem
+    key = tls_private_key.elasticsearch.private_key_pem
+  })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}

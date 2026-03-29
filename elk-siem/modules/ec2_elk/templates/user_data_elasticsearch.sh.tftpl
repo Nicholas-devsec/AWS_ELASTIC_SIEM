@@ -10,8 +10,7 @@ SEED_HOSTS_JSON='${seed_hosts}'
 INITIAL_MASTERS_JSON='${initial_master_nodes}'
 
 SECRET_ELASTIC_PASSWORD="${elastic_master_password_secret}"
-SECRET_ES_TRANSPORT_P12="${es_transport_p12_secret}"
-SECRET_ES_TRANSPORT_P12_PASS="${es_transport_p12_password_secret}"
+SECRET_ES_TLS="${es_tls_secret}"
 SECRET_CA_CERT="${ca_cert_secret}"
 
 mkdir -p /opt/siem
@@ -50,12 +49,11 @@ echo "$CA_CERT_PEM" >/etc/elasticsearch/certs/ca.crt
 chmod 640 /etc/elasticsearch/certs/ca.crt
 chown elasticsearch:elasticsearch /etc/elasticsearch/certs/ca.crt
 
-P12_B64="$(aws --region "$AWS_REGION" secretsmanager get-secret-value --secret-id "$SECRET_ES_TRANSPORT_P12" --query SecretString --output text)"
-echo "$P12_B64" | base64 -d >/etc/elasticsearch/certs/elastic-certificates.p12
-chmod 640 /etc/elasticsearch/certs/elastic-certificates.p12
-chown elasticsearch:elasticsearch /etc/elasticsearch/certs/elastic-certificates.p12
-
-P12_PASS="$(aws --region "$AWS_REGION" secretsmanager get-secret-value --secret-id "$SECRET_ES_TRANSPORT_P12_PASS" --query SecretString --output text 2>/dev/null || true)"
+TLS_JSON="$(aws --region "$AWS_REGION" secretsmanager get-secret-value --secret-id "$SECRET_ES_TLS" --query SecretString --output text)"
+echo "$TLS_JSON" | jq -r .crt >/etc/elasticsearch/certs/elasticsearch.crt
+echo "$TLS_JSON" | jq -r .key >/etc/elasticsearch/certs/elasticsearch.key
+chmod 640 /etc/elasticsearch/certs/elasticsearch.crt /etc/elasticsearch/certs/elasticsearch.key
+chown elasticsearch:elasticsearch /etc/elasticsearch/certs/elasticsearch.crt /etc/elasticsearch/certs/elasticsearch.key
 
 if [ ! -f /etc/elasticsearch/elasticsearch.yml ]; then
   cat >/etc/elasticsearch/elasticsearch.yml <<EOF
@@ -75,12 +73,14 @@ xpack.security.enabled: true
 
 xpack.security.transport.ssl.enabled: true
 xpack.security.transport.ssl.verification_mode: certificate
-xpack.security.transport.ssl.keystore.path: certs/elastic-certificates.p12
-xpack.security.transport.ssl.truststore.path: certs/elastic-certificates.p12
+xpack.security.transport.ssl.key: certs/elasticsearch.key
+xpack.security.transport.ssl.certificate: certs/elasticsearch.crt
+xpack.security.transport.ssl.certificate_authorities: ["certs/ca.crt"]
 
 xpack.security.http.ssl.enabled: true
-xpack.security.http.ssl.keystore.path: certs/elastic-certificates.p12
-xpack.security.http.ssl.truststore.path: certs/elastic-certificates.p12
+xpack.security.http.ssl.key: certs/elasticsearch.key
+xpack.security.http.ssl.certificate: certs/elasticsearch.crt
+xpack.security.http.ssl.certificate_authorities: ["certs/ca.crt"]
 
 path.data: /var/lib/elasticsearch
 path.logs: /var/log/elasticsearch
@@ -106,13 +106,6 @@ fi
 
 if ! /usr/share/elasticsearch/bin/elasticsearch-keystore list | grep -q '^bootstrap.password$'; then
   echo "$ELASTIC_PASSWORD" | /usr/share/elasticsearch/bin/elasticsearch-keystore add -x 'bootstrap.password'
-fi
-
-if [ -n "$P12_PASS" ] && ! /usr/share/elasticsearch/bin/elasticsearch-keystore list | grep -q '^xpack.security.transport.ssl.keystore.secure_password$'; then
-  echo "$P12_PASS" | /usr/share/elasticsearch/bin/elasticsearch-keystore add -x 'xpack.security.transport.ssl.keystore.secure_password'
-  echo "$P12_PASS" | /usr/share/elasticsearch/bin/elasticsearch-keystore add -x 'xpack.security.transport.ssl.truststore.secure_password'
-  echo "$P12_PASS" | /usr/share/elasticsearch/bin/elasticsearch-keystore add -x 'xpack.security.http.ssl.keystore.secure_password'
-  echo "$P12_PASS" | /usr/share/elasticsearch/bin/elasticsearch-keystore add -x 'xpack.security.http.ssl.truststore.secure_password'
 fi
 
 systemctl daemon-reload
