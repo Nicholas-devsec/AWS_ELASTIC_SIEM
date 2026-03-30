@@ -15,12 +15,41 @@ SECRET_CA_CERT="${ca_cert_secret}"
 
 mkdir -p /opt/siem
 
-dnf -y update
-dnf -y install awscli jq unzip openssl amazon-cloudwatch-agent
+install_base_packages() {
+  if command -v dnf >/dev/null 2>&1; then
+    dnf -y update
+    dnf -y install awscli jq unzip openssl curl amazon-cloudwatch-agent
+  elif command -v apt-get >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -y
+    apt-get install -y jq unzip openssl curl ca-certificates gnupg
 
-if [ ! -f /etc/yum.repos.d/elastic-8.x.repo ]; then
-  rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch
-  cat >/etc/yum.repos.d/elastic-8.x.repo <<'REPO'
+    if ! command -v /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl >/dev/null 2>&1; then
+      curl -fsSL -o /tmp/amazon-cloudwatch-agent.deb \
+        https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+      dpkg -i /tmp/amazon-cloudwatch-agent.deb || apt-get -f install -y
+    fi
+  else
+    echo "Unsupported OS: neither dnf nor apt-get found" >&2
+    exit 1
+  fi
+}
+
+install_aws_cli() {
+  if command -v aws >/dev/null 2>&1; then
+    return 0
+  fi
+
+  curl -fsSL -o /tmp/awscliv2.zip https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
+  unzip -q /tmp/awscliv2.zip -d /tmp
+  /tmp/aws/install --update
+}
+
+install_elastic() {
+  if command -v dnf >/dev/null 2>&1; then
+    if [ ! -f /etc/yum.repos.d/elastic-8.x.repo ]; then
+      rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch
+      cat >/etc/yum.repos.d/elastic-8.x.repo <<'REPO'
 [elastic-8.x]
 name=Elastic repository for 8.x packages
 baseurl=https://artifacts.elastic.co/packages/8.x/yum
@@ -30,9 +59,29 @@ enabled=1
 autorefresh=1
 type=rpm-md
 REPO
-fi
+    fi
+    dnf -y install elasticsearch
+  else
+    if [ ! -f /etc/apt/sources.list.d/elastic-8.x.list ]; then
+      curl -fsSL https://artifacts.elastic.co/GPG-KEY-elasticsearch | gpg --dearmor -o /usr/share/keyrings/elastic.gpg
+      echo "deb [signed-by=/usr/share/keyrings/elastic.gpg] https://artifacts.elastic.co/packages/8.x/apt stable main" \
+        >/etc/apt/sources.list.d/elastic-8.x.list
+      apt-get update -y
+    fi
+    apt-get install -y elasticsearch
+  fi
 
-dnf -y install elasticsearch
+  # Prevent Elasticsearch 8.x from starting (and auto-configuring security) before we
+  # finish writing the desired config + keystore bootstrap password.
+  systemctl stop elasticsearch >/dev/null 2>&1 || true
+  systemctl disable elasticsearch >/dev/null 2>&1 || true
+}
+
+install_base_packages
+
+install_aws_cli
+
+install_elastic
 
 mkdir -p /etc/elasticsearch/certs
 chmod 750 /etc/elasticsearch/certs
@@ -55,8 +104,7 @@ echo "$TLS_JSON" | jq -r .key >/etc/elasticsearch/certs/elasticsearch.key
 chmod 640 /etc/elasticsearch/certs/elasticsearch.crt /etc/elasticsearch/certs/elasticsearch.key
 chown elasticsearch:elasticsearch /etc/elasticsearch/certs/elasticsearch.crt /etc/elasticsearch/certs/elasticsearch.key
 
-if [ ! -f /etc/elasticsearch/elasticsearch.yml ]; then
-  cat >/etc/elasticsearch/elasticsearch.yml <<EOF
+cat >/etc/elasticsearch/elasticsearch.yml <<EOF
 cluster.name: elk-siem
 node.name: ${node_name}
 node.master: ${is_master}
@@ -69,6 +117,7 @@ cluster.initial_master_nodes: $INITIAL_MASTERS_JSON
 
 cluster.routing.allocation.awareness.attributes: aws_availability_zone
 
+xpack.security.autoconfiguration.enabled: false
 xpack.security.enabled: true
 
 xpack.security.transport.ssl.enabled: true
@@ -85,9 +134,8 @@ xpack.security.http.ssl.certificate_authorities: ["certs/ca.crt"]
 path.data: /var/lib/elasticsearch
 path.logs: /var/log/elasticsearch
 EOF
-  chown elasticsearch:elasticsearch /etc/elasticsearch/elasticsearch.yml
-  chmod 640 /etc/elasticsearch/elasticsearch.yml
-fi
+chown elasticsearch:elasticsearch /etc/elasticsearch/elasticsearch.yml
+chmod 640 /etc/elasticsearch/elasticsearch.yml
 
 if [ ! -f /etc/elasticsearch/jvm.options.d/heap.options ]; then
   mkdir -p /etc/elasticsearch/jvm.options.d
@@ -104,13 +152,26 @@ if [ ! -f /etc/elasticsearch/elasticsearch.keystore ]; then
   chmod 600 /etc/elasticsearch/elasticsearch.keystore
 fi
 
-if ! /usr/share/elasticsearch/bin/elasticsearch-keystore list | grep -q '^bootstrap.password$'; then
-  echo "$ELASTIC_PASSWORD" | /usr/share/elasticsearch/bin/elasticsearch-keystore add -x 'bootstrap.password'
-fi
+echo "$ELASTIC_PASSWORD" | /usr/share/elasticsearch/bin/elasticsearch-keystore add -xf 'bootstrap.password'
 
 systemctl daemon-reload
 systemctl enable elasticsearch
 systemctl restart elasticsearch
+
+if [ "${is_master}" = "true" ]; then
+  # Configure the built-in kibana_system user password to match the secret-driven value.
+  # Kibana 8.19+ forbids using the "elastic" superuser in kibana.yml.
+  for i in $(seq 1 60); do
+    if curl -sk --cacert /etc/elasticsearch/certs/ca.crt -u "elastic:$ELASTIC_PASSWORD" https://localhost:9200 >/dev/null 2>&1; then
+      curl -sk --cacert /etc/elasticsearch/certs/ca.crt -u "elastic:$ELASTIC_PASSWORD" \
+        -X POST https://localhost:9200/_security/user/kibana_system/_password \
+        -H 'Content-Type: application/json' \
+        -d "{\"password\":\"$ELASTIC_PASSWORD\"}" >/dev/null 2>&1 || true
+      break
+    fi
+    sleep 5
+  done
+fi
 
 cat >/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json <<'CWCFG'
 {

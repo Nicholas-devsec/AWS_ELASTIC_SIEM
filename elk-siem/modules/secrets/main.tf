@@ -20,7 +20,8 @@ locals {
 resource "aws_secretsmanager_secret" "this" {
   for_each = toset(local.secret_names)
 
-  name = each.value
+  name                    = each.value
+  recovery_window_in_days = var.recovery_window_in_days
 
   tags = merge(var.tags, {
     Name = each.value
@@ -195,7 +196,7 @@ resource "aws_secretsmanager_secret_version" "logstash_es_credentials" {
 resource "aws_secretsmanager_secret_version" "kibana_es_credentials" {
   secret_id = aws_secretsmanager_secret.this["siem/kibana/es-credentials"].id
   secret_string = jsonencode({
-    user     = "elastic"
+    user     = "kibana_system"
     password = random_password.elastic_master.result
   })
 

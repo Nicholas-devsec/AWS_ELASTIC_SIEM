@@ -29,8 +29,8 @@ variable "sg_nlb_id" {
 }
 
 variable "logstash_instance_ids" {
-  type        = list(string)
-  description = "Instance IDs for Logstash targets."
+  type        = map(string)
+  description = "Map of Logstash instance ids (static keys like az names -> instance id)."
 }
 
 variable "tags" {
@@ -38,4 +38,3 @@ variable "tags" {
   description = "Common tags."
   default     = {}
 }
-

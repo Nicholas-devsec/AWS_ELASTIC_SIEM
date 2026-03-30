@@ -27,6 +27,23 @@ variable "project" {
 variable "kms_admin_principal_arn" {
   type        = string
   description = "Principal ARN that administers this key."
+  default     = ""
+
+  validation {
+    condition     = var.kms_admin_principal_arn == "" || can(regex("^arn:aws:iam::[0-9]{12}:(role|user)/.+$", var.kms_admin_principal_arn))
+    error_message = "kms_admin_principal_arn must be empty or an IAM role/user ARN."
+  }
+}
+
+variable "deletion_window_in_days" {
+  type        = number
+  description = "KMS key deletion window in days (min 7)."
+  default     = 30
+
+  validation {
+    condition     = var.deletion_window_in_days >= 7 && var.deletion_window_in_days <= 30
+    error_message = "deletion_window_in_days must be between 7 and 30."
+  }
 }
 
 variable "tags" {

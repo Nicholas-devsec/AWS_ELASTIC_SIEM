@@ -16,9 +16,13 @@ terraform {
     }
   }
 
-  # Remote state backend:
-  # - Create via ../bootstrap first, then paste the backend config here.
-  # backend "s3" {}
+  backend "s3" {
+    bucket         = "elk-siem-dev-tfstate-123456789012"
+    key            = "elk-siem/dev/terraform.tfstate"
+    region         = "us-west-2"
+    dynamodb_table = "elk-siem-dev-terraform-locks"
+    encrypt        = true
+  }
 }
 
 provider "aws" {

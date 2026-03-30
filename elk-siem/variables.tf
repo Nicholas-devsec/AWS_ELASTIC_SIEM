@@ -50,11 +50,11 @@ variable "availability_zones" {
 
 variable "ami_id" {
   type        = string
-  description = "AMI ID for all instances (Amazon Linux 2023 or hardened AMI)."
+  description = "AMI ID for all instances (Ubuntu 24.04 LTS or hardened AMI)."
 
   validation {
     condition     = can(regex("^ami-[0-9a-fA-F]{8,}$", var.ami_id))
-    error_message = "ami_id must look like an AMI id (e.g., ami-0123456789abcdef0)."
+    error_message = "ami_id must look like an AMI id (e.g., ami-0d76b909de1a0595d)."
   }
 }
 
@@ -82,6 +82,18 @@ variable "beats_source_cidrs" {
   }
 }
 
+variable "beats_allow_vpc_cidr" {
+  type        = bool
+  description = "When true, also allows Beats ingest from within the VPC CIDR (useful for demo/test instances inside the VPC)."
+  default     = true
+}
+
+variable "enable_beats_demo" {
+  type        = bool
+  description = "When true, provisions a small demo instance running Filebeat that ships system logs to Logstash."
+  default     = false
+}
+
 variable "vpn_cidr_blocks" {
   type        = list(string)
   description = "CIDRs allowed to access Kibana privately (port 5601)."
@@ -105,10 +117,11 @@ variable "alert_email" {
 variable "kms_admin_principal_arn" {
   type        = string
   description = "ARN of the principal allowed to administer the KMS key (e.g., a dedicated admin role)."
+  default     = ""
 
   validation {
-    condition     = can(regex("^arn:aws:iam::[0-9]{12}:(role|user)/.+$", var.kms_admin_principal_arn))
-    error_message = "kms_admin_principal_arn must be an IAM role/user ARN (e.g., arn:aws:iam::123456789012:role/security-admin)."
+    condition     = var.kms_admin_principal_arn == "" || can(regex("^arn:aws:iam::[0-9]{12}:(role|user)/.+$", var.kms_admin_principal_arn))
+    error_message = "kms_admin_principal_arn must be empty or an IAM role/user ARN (e.g., arn:aws:iam::000000000000:role/security-admin)."
   }
 }
 
@@ -187,6 +200,34 @@ variable "snapshot_delete_days" {
   type        = number
   description = "Days before deleting snapshots."
   default     = 365
+}
+
+variable "force_destroy_buckets" {
+  type        = bool
+  description = "When true, allows Terraform to destroy S3 buckets even if they contain objects/versions (recommended for dev)."
+  default     = false
+}
+
+variable "secrets_recovery_window_days" {
+  type        = number
+  description = "Secrets Manager recovery window in days (0 = delete without recovery; recommended 0 for dev)."
+  default     = 30
+
+  validation {
+    condition     = var.secrets_recovery_window_days == 0 || (var.secrets_recovery_window_days >= 7 && var.secrets_recovery_window_days <= 30)
+    error_message = "secrets_recovery_window_days must be 0 or between 7 and 30."
+  }
+}
+
+variable "kms_deletion_window_days" {
+  type        = number
+  description = "KMS key deletion window in days (min 7). Use 7 for dev."
+  default     = 30
+
+  validation {
+    condition     = var.kms_deletion_window_days >= 7 && var.kms_deletion_window_days <= 30
+    error_message = "kms_deletion_window_days must be between 7 and 30."
+  }
 }
 
 variable "es_root_volume_gb" {

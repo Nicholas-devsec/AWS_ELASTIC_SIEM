@@ -13,6 +13,16 @@ variable "project" {
   description = "Project tag value."
 }
 
+variable "availability_zones" {
+  type        = list(string)
+  description = "Two AZs for the deployment, in [a, b] order."
+
+  validation {
+    condition     = length(var.availability_zones) == 2
+    error_message = "availability_zones must contain exactly 2 AZs."
+  }
+}
+
 variable "ami_id" {
   type        = string
   description = "AMI ID for instances."
@@ -36,6 +46,26 @@ variable "private_ingestion_subnet_ids" {
 variable "private_elk_subnet_ids" {
   type        = list(string)
   description = "Private ELK subnet IDs [az-a, az-b]."
+}
+
+variable "private_ingestion_subnet_cidrs" {
+  type        = list(string)
+  description = "Private ingestion subnet CIDRs [az-a, az-b]."
+
+  validation {
+    condition     = length(var.private_ingestion_subnet_cidrs) == 2
+    error_message = "private_ingestion_subnet_cidrs must contain exactly 2 CIDRs."
+  }
+}
+
+variable "private_elk_subnet_cidrs" {
+  type        = list(string)
+  description = "Private ELK subnet CIDRs [az-a, az-b]."
+
+  validation {
+    condition     = length(var.private_elk_subnet_cidrs) == 2
+    error_message = "private_elk_subnet_cidrs must contain exactly 2 CIDRs."
+  }
 }
 
 variable "sg_elasticsearch_id" {
@@ -123,4 +153,3 @@ variable "tags" {
   description = "Common tags."
   default     = {}
 }
-

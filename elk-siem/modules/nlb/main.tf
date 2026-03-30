@@ -31,7 +31,7 @@ resource "aws_lb_target_group" "logstash" {
 }
 
 resource "aws_lb_target_group_attachment" "logstash" {
-  for_each = toset(var.logstash_instance_ids)
+  for_each = var.logstash_instance_ids
 
   target_group_arn = aws_lb_target_group.logstash.arn
   target_id        = each.value
@@ -48,4 +48,3 @@ resource "aws_lb_listener" "beats" {
     target_group_arn = aws_lb_target_group.logstash.arn
   }
 }
-

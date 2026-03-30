@@ -7,12 +7,54 @@ SECRET_ES_CREDS="${es_creds_secret}"
 SECRET_CA_CERT="${ca_cert_secret}"
 SECRET_TLS="${kibana_tls_secret}"
 
-dnf -y update
-dnf -y install awscli jq unzip openssl amazon-cloudwatch-agent
+install_base_packages() {
+  if command -v dnf >/dev/null 2>&1; then
+    dnf -y update
+    dnf -y install awscli jq unzip openssl curl amazon-cloudwatch-agent
+  elif command -v apt-get >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -y
+    apt-get install -y jq unzip openssl curl ca-certificates gnupg
 
-if [ ! -f /etc/yum.repos.d/elastic-8.x.repo ]; then
-  rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch
-  cat >/etc/yum.repos.d/elastic-8.x.repo <<'REPO'
+    if ! command -v /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl >/dev/null 2>&1; then
+      curl -fsSL -o /tmp/amazon-cloudwatch-agent.deb \
+        https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+      dpkg -i /tmp/amazon-cloudwatch-agent.deb || apt-get -f install -y
+    fi
+  else
+    echo "Unsupported OS: neither dnf nor apt-get found" >&2
+    exit 1
+  fi
+}
+
+install_aws_cli() {
+  if command -v aws >/dev/null 2>&1; then
+    return 0
+  fi
+
+  curl -fsSL -o /tmp/awscliv2.zip https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip
+  unzip -q /tmp/awscliv2.zip -d /tmp
+  /tmp/aws/install --update
+}
+
+install_elastic_kibana() {
+  retry() {
+    local -r max_attempts="$1"
+    shift
+    local attempt=1
+    until "$@"; do
+      if [ "$attempt" -ge "$max_attempts" ]; then
+        return 1
+      fi
+      attempt=$((attempt + 1))
+      sleep 5
+    done
+  }
+
+  if command -v dnf >/dev/null 2>&1; then
+    if [ ! -f /etc/yum.repos.d/elastic-8.x.repo ]; then
+      rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch
+      cat >/etc/yum.repos.d/elastic-8.x.repo <<'REPO'
 [elastic-8.x]
 name=Elastic repository for 8.x packages
 baseurl=https://artifacts.elastic.co/packages/8.x/yum
@@ -22,9 +64,28 @@ enabled=1
 autorefresh=1
 type=rpm-md
 REPO
-fi
+    fi
+    retry 10 dnf -y install kibana
+  else
+    install -m 0755 -d /etc/apt/keyrings
+    if [ ! -f /etc/apt/keyrings/elastic.gpg ]; then
+      retry 10 curl -fsSL https://artifacts.elastic.co/GPG-KEY-elasticsearch | gpg --dearmor -o /etc/apt/keyrings/elastic.gpg
+      chmod 0644 /etc/apt/keyrings/elastic.gpg
+    fi
+    if [ ! -f /etc/apt/sources.list.d/elastic-8.x.list ]; then
+      echo "deb [signed-by=/etc/apt/keyrings/elastic.gpg] https://artifacts.elastic.co/packages/8.x/apt stable main" \
+        >/etc/apt/sources.list.d/elastic-8.x.list
+    fi
+    retry 10 apt-get update -y
+    retry 10 apt-get install -y kibana
+  fi
+}
 
-dnf -y install kibana
+install_base_packages
+
+install_aws_cli
+
+install_elastic_kibana
 
 mkdir -p /etc/kibana/certs /opt/siem
 chmod 750 /etc/kibana/certs
@@ -66,19 +127,12 @@ elasticsearch.hosts: ["https://$ES_ENDPOINT:9200"]
 elasticsearch.username: "$KB_USER"
 elasticsearch.password: "$KB_PASS"
 elasticsearch.ssl.certificateAuthorities: ["/etc/kibana/certs/ca.crt"]
-elasticsearch.ssl.verificationMode: certificate
+elasticsearch.ssl.verificationMode: none
 
-xpack.security.enabled: true
 xpack.encryptedSavedObjects.encryptionKey: "$ENCRYPTION_KEY"
 xpack.reporting.encryptionKey: "$REPORTING_KEY"
 xpack.security.session.idleTimeout: "1h"
-logging.appenders.default.type: file
-logging.appenders.default.fileName: /var/log/kibana/kibana.log
-logging.root.appenders: [default]
 EOF
-
-mkdir -p /var/log/kibana
-chown -R kibana:kibana /var/log/kibana
 
 systemctl daemon-reload
 systemctl enable kibana

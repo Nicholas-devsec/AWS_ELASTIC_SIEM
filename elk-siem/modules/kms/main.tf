@@ -18,17 +18,20 @@ data "aws_iam_policy_document" "key_policy" {
     resources = ["*"]
   }
 
-  statement {
-    sid     = "AllowDedicatedKeyAdmin"
-    effect  = "Allow"
-    actions = ["kms:*"]
+  dynamic "statement" {
+    for_each = var.kms_admin_principal_arn != "" ? [1] : []
+    content {
+      sid     = "AllowDedicatedKeyAdmin"
+      effect  = "Allow"
+      actions = ["kms:*"]
 
-    principals {
-      type        = "AWS"
-      identifiers = [var.kms_admin_principal_arn]
+      principals {
+        type        = "AWS"
+        identifiers = [var.kms_admin_principal_arn]
+      }
+
+      resources = ["*"]
     }
-
-    resources = ["*"]
   }
 
   # Delegate key usage authorization to IAM policies within this account.
@@ -99,7 +102,7 @@ data "aws_iam_policy_document" "key_policy" {
 resource "aws_kms_key" "siem" {
   description             = "ELK SIEM KMS key (${var.environment})"
   enable_key_rotation     = true
-  deletion_window_in_days = 30
+  deletion_window_in_days = var.deletion_window_in_days
   policy                  = data.aws_iam_policy_document.key_policy.json
 
   tags = merge(var.tags, {

@@ -24,7 +24,7 @@ resource "aws_cloudwatch_log_group" "kibana" {
 
 resource "aws_s3_bucket" "vpc_flow" {
   bucket        = var.vpc_flow_bucket_name
-  force_destroy = false
+  force_destroy = var.force_destroy_buckets
 
   tags = merge(var.tags, {
     Name = var.vpc_flow_bucket_name
