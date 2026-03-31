@@ -44,3 +44,8 @@ Thumbs.db
 
 # Codex CLI
 .codex/
+
+# Local docs / codex
+IAC_SUMMARY.md
+SIEM_ARCHITECTURE_PLAN.md
+.codex
