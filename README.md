@@ -51,7 +51,9 @@ Kibana is not in the ingest path; it reads from Elasticsearch.
 
 ## Screenshots (examples)
 
-![Managed Nodes](images/managed_nodes.png)
+SSM managed nodes (shows the fleet is reachable via Session Manager):
+
+![SSM Managed Nodes](images/managed_nodes.png)
 
 ![Example Logs](images/example_siem_logs_good.png)
 

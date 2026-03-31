@@ -33,7 +33,7 @@ tfplan.*
 **/tfplan
 **/tfplan.*
 
-# Trivy workflow outputs (generated in CI or locally)
+# Trivy workflow outputs 
 trivy-config-results.*
 
 # OS / editor
