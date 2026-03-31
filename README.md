@@ -1,114 +1,70 @@
 # AWS SIEM Lab (Elastic Stack on EC2, Terraform)
 
-This repo builds a small SIEM-style lab in AWS using Elasticsearch + Logstash + Kibana (ELK) on EC2, wired together with private subnets, SSM access, KMS encryption, and S3 snapshots. It’s designed to be reproducible, teardown-friendly, and good for portfolio screenshots.
+This repo is a hands-on SIEM lab build in AWS: Elasticsearch + Logstash + Kibana on EC2, segmented into public/ingestion/cluster subnets, with Secrets Manager, KMS encryption, VPC flow logs, and S3 snapshots. The goal is a realistic security engineering exercise you can stand up, validate with real events, take screenshots, and tear down quickly.
 
-![SIEM Resource Map](images/SIEM_rerouce_map.png)
+![Architecture Diagram](images/IAC_Drawio.png)
 
-## What’s in here
+## What this build optimizes for
 
-- `bootstrap/`: Creates the remote Terraform backend (S3 state bucket + DynamoDB lock table + KMS key).
-- `elk-siem/`: Main infrastructure (VPC, EC2 for ES/Logstash/Kibana, internal Beats NLB, Secrets Manager, snapshot bucket, flow logs, alarms).
-- `SIEM_ARCHITECTURE_PLAN.md`: High-level design notes.
-- `IAC_SUMMARY.md`: Implementation summary / knobs.
+- **Private-first access**: Kibana is reachable via SSM port-forward by default; no public ingress required.
+- **Defense-in-depth basics**: KMS for at-rest encryption (EBS/S3/Secrets), restricted security groups, and VPC flow logs.
+- **Operational simplicity**: Everything bootstraps from user-data, pulls secrets at boot, and avoids manual “click ops” where possible.
+- **Cost control**: Dev-friendly destroy behavior (force-destroy buckets, short secret recovery windows) so the lab doesn’t linger.
 
-## Architecture (at a glance)
-
-Data flow:
+## Data path (how logs move)
 
 `Filebeat (demo host)` → `internal NLB :5044 (TCP)` → `Logstash` → `Elasticsearch (HTTPS :9200)` → `Kibana (HTTPS :5601)`
 
-Notes:
-- Elasticsearch uses TLS on both transport (`:9300`) and HTTP (`:9200`).
-- Kibana is intended to be private-only by default (SSM port-forward), with an optional public ALB/WAF path if you enable it and provide an ACM cert.
-- The Beats-to-Logstash hop is **plain TCP** in the current lab config (inside the VPC). If you want TLS there, see “Hardening” below.
+Kibana is not in the ingest path; it reads from Elasticsearch.
+
+## Key engineering decisions (and why)
+
+- **No ACM + no public Kibana by default**
+  - This lab was built without a domain on hand, so an ACM-backed HTTPS listener on a public ALB wasn’t the fastest path to “working screenshots”.
+  - Default access is **SSM port-forward → `https://localhost:5601`**.
+  - If you *do* want a public entry point later, the IaC supports “bring your own cert” via ACM: set `enable_public_kibana=true` and provide `acm_cert_arn`.
+
+- **TLS where it matters most**
+  - Elasticsearch runs TLS for HTTP (`:9200`) and transport (`:9300`).
+  - The Beats hop is **plain TCP inside the VPC** in the current config. We originally tried Beats TLS, but the cert/key bootstrapping wasn’t reliable and Logstash crash-looped. For a lab, reliability > perfection.
+
+- **Secrets are pulled at boot**
+  - Instances use IAM instance profiles + SSM, and fetch Secrets Manager values during user-data.
+  - This keeps sensitive values out of the repo and avoids baking credentials into AMIs.
+
+- **Backups are real (and cheap over time)**
+  - Elasticsearch snapshots go to a dedicated S3 bucket with SSE-KMS + versioning.
+  - Lifecycle defaults: **Glacier after 30 days**, delete after **365 days**.
+
+## Repo layout
+
+- `bootstrap/`: Remote Terraform backend (S3 state bucket + DynamoDB lock table + KMS key).
+- `elk-siem/`: Main stack (VPC, EC2, internal Beats NLB, Secrets Manager, snapshot bucket, flow logs, alarms).
+- `SIEM_ARCHITECTURE_PLAN.md`: Design notes.
+- `IAC_SUMMARY.md`: What was built / key knobs.
 
 ## Screenshots (examples)
 
-Managed nodes / SSM visibility:
-
 ![Managed Nodes](images/managed_nodes.png)
-
-Example logs in Kibana:
 
 ![Example Logs](images/example_siem_logs_good.png)
 
-## Prereqs
+![AWS Resource Map](images/SIEM_rerouce_map.png)
 
-- Terraform installed locally
-- AWS credentials configured (e.g. `aws configure` or SSO)
-- Session Manager plugin (for port-forwarding via SSM)
+## Minimal “how to run it”
 
-## Deploy
-
-1) Bootstrap the remote backend
+You’ll configure values in `elk-siem/terraform.tfvars`, then:
 
 ```bash
-cd bootstrap
-terraform init
-terraform apply
-terraform output
+cd bootstrap && terraform init && terraform apply
+cd ../elk-siem && terraform init -reconfigure && terraform apply
 ```
 
-2) Deploy the main stack
+## Tear down
 
 ```bash
-cd ../elk-siem
-terraform init -reconfigure
-terraform apply
+cd elk-siem && terraform destroy
+cd ../bootstrap && terraform destroy
 ```
 
-Configuration lives in `elk-siem/terraform.tfvars`. In `dev`, this repo supports faster teardown (force-destroy buckets, short recovery windows, etc.). Don’t reuse those settings for prod.
-
-## Access Kibana (no domain / no ACM)
-
-Port-forward to the Kibana instance over SSM (replace the instance id):
-
-```bash
-aws ssm start-session \
-  --target i-xxxxxxxxxxxxxxxxx \
-  --document-name AWS-StartPortForwardingSession \
-  --parameters portNumber=5601,localPortNumber=5601
-```
-
-Then open:
-
-- `https://localhost:5601`
-
-## Generate demo logs
-
-On the demo host (SSM shell):
-
-```bash
-for i in $(seq 1 50); do
-  logger -t beats-demo "SIEM screenshot event $i $(date -Is)"
-  sleep 1
-done
-```
-
-In Kibana:
-
-- Discover → data view `logs-*` (or whatever indices/data streams you see)
-- KQL: `message:"SIEM screenshot event"`
-
-## Destroy (important for cost)
-
-Destroy the main stack first, then the backend:
-
-```bash
-cd elk-siem
-terraform destroy
-
-cd ../bootstrap
-terraform destroy
-```
-
-Some resources (notably KMS keys) can remain in “pending deletion” for a while by design.
-
-## Hardening notes (optional)
-
-If you plan to expand this beyond a lab:
-
-- Enable TLS on the Beats → Logstash hop (NLB stays TCP pass-through; Logstash terminates TLS).
-- Consider replacing self-signed certs with ACM/Private CA where appropriate.
-- Lock down security groups to only required sources (VPN, VPC CIDRs, specific workload subnets).
-
+Expect some resources (notably KMS keys) to sit in “pending deletion” for a while by design.
