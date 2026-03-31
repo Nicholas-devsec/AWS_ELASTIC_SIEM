@@ -46,8 +46,7 @@ Kibana is not in the ingest path; it reads from Elasticsearch.
 
 - `bootstrap/`: Remote Terraform backend (S3 state bucket + DynamoDB lock table + KMS key).
 - `elk-siem/`: Main stack (VPC, EC2, internal Beats NLB, Secrets Manager, snapshot bucket, flow logs, alarms).
-- `SIEM_ARCHITECTURE_PLAN.md`: Design notes.
-- `IAC_SUMMARY.md`: What was built / key knobs.
+ - `images/`: Diagrams and screenshots used in this write-up.
 
 ## Screenshots (examples)
 
