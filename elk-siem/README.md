@@ -1,6 +1,6 @@
 # AWS ELK SIEM (Terraform)
 
-This folder contains the Terraform implementation for the architecture in `../SIEM_ARCHITECTURE_PLAN.md`.
+This folder contains the Terraform implementation for the Elastic SIEM lab.
 
 Key defaults in this implementation:
 - Kibana is private-only (VPN/SSM); `enable_public_kibana = false` by default.
@@ -21,4 +21,3 @@ Secret payload expectations (populate via AWS Console/CLI):
 - `siem/tls/kibana-cert`: JSON: `{"crt":"PEM","key":"PEM"}`
 - `siem/tls/es-transport-p12`: base64-encoded PKCS12 content.
 - `siem/tls/es-transport-p12-password` (optional): plaintext password string (empty if none).
-
