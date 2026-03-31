@@ -67,7 +67,8 @@ resource "aws_ssm_document" "siem_es_ops" {
         inputs = {
           runCommand = [
             "set -euo pipefail",
-            "REGION=$(curl -s http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region)",
+            "TOKEN=$(curl -sS -X PUT http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600')",
+            "REGION=$(curl -sS -H \"X-aws-ec2-metadata-token: $TOKEN\" http://169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region)",
             "ELASTIC_PASS=$(aws --region \"$REGION\" secretsmanager get-secret-value --secret-id \"siem/elasticsearch/master-password\" --query SecretString --output text)",
             "CACERT=/etc/elasticsearch/certs/ca.crt",
             "BASE=https://localhost:9200",

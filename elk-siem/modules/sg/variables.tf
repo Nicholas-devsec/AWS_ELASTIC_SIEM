@@ -13,9 +13,20 @@ variable "vpc_id" {
   description = "VPC ID."
 }
 
+variable "vpc_cidr" {
+  type        = string
+  description = "VPC CIDR (used for optional internal Beats allowlist)."
+}
+
 variable "beats_source_cidrs" {
   type        = list(string)
   description = "Allowed CIDRs for Beats ingest."
+}
+
+variable "beats_allow_vpc_cidr" {
+  type        = bool
+  description = "When true, also allows Beats ingest from within the VPC CIDR."
+  default     = true
 }
 
 variable "vpn_cidr_blocks" {
@@ -28,4 +39,3 @@ variable "tags" {
   description = "Common tags."
   default     = {}
 }
-

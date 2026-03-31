@@ -6,8 +6,10 @@ locals {
     environment = var.environment
   }
 
-  snapshot_bucket_name = "siem-es-snapshots-${var.environment}-${data.aws_caller_identity.current.account_id}"
-  vpc_flow_bucket_name = "siem-vpc-flow-logs-${var.environment}-${data.aws_caller_identity.current.account_id}"
+  account_id = var.account_id != "" ? var.account_id : data.aws_caller_identity.current.account_id
+
+  snapshot_bucket_name = "siem-es-snapshots-${var.environment}-${local.account_id}"
+  vpc_flow_bucket_name = "siem-vpc-flow-logs-${var.environment}-${local.account_id}"
   vpc_flow_bucket_arn  = "arn:aws:s3:::${local.vpc_flow_bucket_name}"
 }
 
@@ -15,9 +17,11 @@ module "kms" {
   source = "./modules/kms"
 
   aws_region              = var.aws_region
+  account_id              = local.account_id
   environment             = var.environment
   project                 = var.project
   kms_admin_principal_arn = var.kms_admin_principal_arn
+  deletion_window_in_days = var.kms_deletion_window_days
   tags                    = local.tags
 
   log_delivery_s3_bucket_arns = [local.vpc_flow_bucket_arn]
@@ -37,10 +41,11 @@ module "iam" {
 module "secrets" {
   source = "./modules/secrets"
 
-  aws_region  = var.aws_region
-  environment = var.environment
-  project     = var.project
-  tags        = local.tags
+  aws_region              = var.aws_region
+  environment             = var.environment
+  project                 = var.project
+  tags                    = local.tags
+  recovery_window_in_days = var.secrets_recovery_window_days
 
   logstash_role_arn      = module.iam.logstash_role_arn
   elasticsearch_role_arn = module.iam.elasticsearch_role_arn
@@ -60,12 +65,14 @@ module "vpc" {
 module "sg" {
   source = "./modules/sg"
 
-  environment        = var.environment
-  project            = var.project
-  vpc_id             = module.vpc.vpc_id
-  beats_source_cidrs = var.beats_source_cidrs
-  vpn_cidr_blocks    = var.vpn_cidr_blocks
-  tags               = local.tags
+  environment          = var.environment
+  project              = var.project
+  vpc_id               = module.vpc.vpc_id
+  vpc_cidr             = var.vpc_cidr
+  beats_source_cidrs   = var.beats_source_cidrs
+  beats_allow_vpc_cidr = var.beats_allow_vpc_cidr
+  vpn_cidr_blocks      = var.vpn_cidr_blocks
+  tags                 = local.tags
 }
 
 module "s3" {
@@ -74,6 +81,7 @@ module "s3" {
   environment            = var.environment
   project                = var.project
   snapshot_bucket_name   = local.snapshot_bucket_name
+  force_destroy_buckets  = var.force_destroy_buckets
   kms_key_arn            = module.kms.key_arn
   elasticsearch_role_arn = module.iam.elasticsearch_role_arn
   snapshot_glacier_days  = var.snapshot_glacier_days
@@ -84,17 +92,20 @@ module "s3" {
 module "ec2_elk" {
   source = "./modules/ec2_elk"
 
-  aws_region  = var.aws_region
-  environment = var.environment
-  project     = var.project
-  tags        = local.tags
+  aws_region         = var.aws_region
+  environment        = var.environment
+  project            = var.project
+  availability_zones = var.availability_zones
+  tags               = local.tags
 
   ami_id = var.ami_id
 
-  vpc_id                       = module.vpc.vpc_id
-  public_subnet_ids            = module.vpc.public_subnet_ids
-  private_elk_subnet_ids       = module.vpc.private_elk_subnet_ids
-  private_ingestion_subnet_ids = module.vpc.private_ingestion_subnet_ids
+  vpc_id                         = module.vpc.vpc_id
+  public_subnet_ids              = module.vpc.public_subnet_ids
+  private_elk_subnet_ids         = module.vpc.private_elk_subnet_ids
+  private_ingestion_subnet_ids   = module.vpc.private_ingestion_subnet_ids
+  private_elk_subnet_cidrs       = module.vpc.private_elk_subnet_cidrs
+  private_ingestion_subnet_cidrs = module.vpc.private_ingestion_subnet_cidrs
 
   sg_elasticsearch_id = module.sg.sg_elasticsearch_id
   sg_logstash_id      = module.sg.sg_logstash_id
@@ -134,7 +145,25 @@ module "nlb" {
   public_subnet_ids = module.vpc.public_subnet_ids
   sg_nlb_id         = module.sg.sg_nlb_id
 
-  logstash_instance_ids = module.ec2_elk.logstash_instance_ids
+  logstash_instance_ids = module.ec2_elk.logstash_instance_ids_by_az
+}
+
+module "beats_demo" {
+  source = "./modules/beats_demo"
+  count  = var.enable_beats_demo ? 1 : 0
+
+  aws_region  = var.aws_region
+  environment = var.environment
+  project     = var.project
+  tags        = local.tags
+
+  vpc_id      = module.vpc.vpc_id
+  subnet_id   = module.vpc.public_subnet_ids[0]
+  ami_id      = var.ami_id
+  kms_key_arn = module.kms.key_arn
+
+  logstash_host = module.nlb.dns_name
+  admin_cidrs   = var.vpn_cidr_blocks
 }
 
 module "alb" {
@@ -148,6 +177,7 @@ module "alb" {
   vpc_id              = module.vpc.vpc_id
   public_subnet_ids   = module.vpc.public_subnet_ids
   allowed_analyst_ips = var.allowed_analyst_ips
+  acm_cert_arn        = var.acm_cert_arn
 
   kibana_instance_id = module.ec2_elk.kibana_instance_id
   sg_alb_id          = module.sg.sg_alb_id
@@ -161,8 +191,9 @@ module "cloudwatch" {
   project     = var.project
   tags        = local.tags
 
-  vpc_id               = module.vpc.vpc_id
-  vpc_flow_bucket_name = local.vpc_flow_bucket_name
-  kms_key_arn          = module.kms.key_arn
-  alert_email          = var.alert_email
+  vpc_id                = module.vpc.vpc_id
+  vpc_flow_bucket_name  = local.vpc_flow_bucket_name
+  force_destroy_buckets = var.force_destroy_buckets
+  kms_key_arn           = module.kms.key_arn
+  alert_email           = var.alert_email
 }

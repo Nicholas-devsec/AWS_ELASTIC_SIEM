@@ -1,6 +1,6 @@
 resource "aws_s3_bucket" "snapshot" {
   bucket        = var.snapshot_bucket_name
-  force_destroy = false
+  force_destroy = var.force_destroy_buckets
 
   tags = merge(var.tags, {
     Name = var.snapshot_bucket_name

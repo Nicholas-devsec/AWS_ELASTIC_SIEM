@@ -12,7 +12,9 @@ override.tf.json
 *_override.tf.json
 .terraformrc
 terraform.rc
-.terraform.lock.hcl
+
+# Local plugin socket dir used in restricted environments
+**/.terraform-plugin-sockets/
 
 # Sensitive files / keys
 *.pem
@@ -25,9 +27,20 @@ terraform.rc
 # Logs
 *.log
 
+# Terraform plan output files
+tfplan
+tfplan.*
+**/tfplan
+**/tfplan.*
+
+# Trivy workflow outputs (generated in CI or locally)
+trivy-config-results.*
+
 # OS / editor
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
 
+# Codex CLI
+.codex/

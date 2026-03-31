@@ -2,6 +2,10 @@ output "logstash_instance_ids" {
   value = [for _, inst in aws_instance.logstash : inst.id]
 }
 
+output "logstash_instance_ids_by_az" {
+  value = { for k, inst in aws_instance.logstash : k => inst.id }
+}
+
 output "kibana_instance_id" {
   value = aws_instance.kibana.id
 }

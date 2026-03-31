@@ -1,4 +1,4 @@
-name: tfsec
+name: iac-security-scan
 
 on:
   pull_request:
@@ -8,15 +8,98 @@ permissions:
   contents: read
 
 jobs:
-  tfsec:
-    name: tfsec (high/critical)
+  trivy_config:
+    name: trivy config (high/critical)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run tfsec
-        uses: aquasecurity/tfsec-action@v1
+      # Safe action version following Aqua Security incident guidance (pinned)
+      - name: Trivy config scan (table output)
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
-          soft_fail: false
-          additional_args: --minimum-severity HIGH --force-all-dirs .
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+          format: table
+          output: trivy-config-results.txt
+          hide-progress: true
+
+      - name: Trivy config scan (json output)
+        uses: aquasecurity/trivy-action@v0.35.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+          format: json
+          output: trivy-config-results.json
+          hide-progress: true
+
+      - name: Enforce HIGH/CRITICAL (with allowlist)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          allow = set()
+          allow_path = pathlib.Path("trivy-allowlist.txt")
+          if allow_path.exists():
+            for raw in allow_path.read_text(encoding="utf-8").splitlines():
+              line = raw.strip()
+              if not line or line.startswith("#"):
+                continue
+              allow.add(line)
+
+          data = json.loads(pathlib.Path("trivy-config-results.json").read_text(encoding="utf-8"))
+          blocking = []
+
+          for result in data.get("Results", []) or []:
+            target = result.get("Target", "")
+            for mis in result.get("Misconfigurations", []) or []:
+              severity = (mis.get("Severity") or "").upper()
+              if severity not in ("HIGH", "CRITICAL"):
+                continue
+
+              ids = set()
+              for key in ("ID", "AVDID", "MisconfID"):
+                value = mis.get(key)
+                if value:
+                  ids.add(value)
+
+              if allow.intersection(ids):
+                continue
+
+              cause = mis.get("CauseMetadata") or {}
+              resource = cause.get("Resource", "") if isinstance(cause, dict) else ""
+              title = mis.get("Title") or ""
+              blocking.append((severity, next(iter(ids), "UNKNOWN"), target, resource, title))
+
+          if blocking:
+            print("Blocking Trivy misconfigurations (HIGH/CRITICAL, not allowlisted):")
+            for severity, mid, target, resource, title in blocking:
+              parts = [severity, mid, target]
+              if resource:
+                parts.append(resource)
+              if title:
+                parts.append(title)
+              print("- " + " | ".join([p for p in parts if p]))
+            sys.exit(1)
+
+          print("No blocking HIGH/CRITICAL misconfigurations found.")
+          PY
+
+      - name: Upload scan report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-config-results
+          path: |
+            trivy-config-results.txt
+            trivy-config-results.json
+            trivy-allowlist.txt

@@ -13,6 +13,17 @@ variable "project" {
   description = "Project tag value."
 }
 
+variable "recovery_window_in_days" {
+  type        = number
+  description = "Secrets Manager recovery window in days (0 = delete without recovery; recommended 0 for dev)."
+  default     = 30
+
+  validation {
+    condition     = var.recovery_window_in_days == 0 || (var.recovery_window_in_days >= 7 && var.recovery_window_in_days <= 30)
+    error_message = "recovery_window_in_days must be 0 or between 7 and 30."
+  }
+}
+
 variable "logstash_role_arn" {
   type        = string
   description = "Logstash role ARN allowed to read logstash and tls secrets."
@@ -33,4 +44,3 @@ variable "tags" {
   description = "Common tags."
   default     = {}
 }
-

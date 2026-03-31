@@ -1,5 +1,9 @@
 data "aws_caller_identity" "current" {}
 
+locals {
+  account_id = var.account_id != "" ? var.account_id : data.aws_caller_identity.current.account_id
+}
+
 data "aws_iam_policy_document" "key_policy" {
   statement {
     sid     = "EnableAccountRootPermissions"
@@ -8,23 +12,26 @@ data "aws_iam_policy_document" "key_policy" {
 
     principals {
       type        = "AWS"
-      identifiers = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"]
+      identifiers = ["arn:aws:iam::${local.account_id}:root"]
     }
 
     resources = ["*"]
   }
 
-  statement {
-    sid     = "AllowDedicatedKeyAdmin"
-    effect  = "Allow"
-    actions = ["kms:*"]
+  dynamic "statement" {
+    for_each = var.kms_admin_principal_arn != "" ? [1] : []
+    content {
+      sid     = "AllowDedicatedKeyAdmin"
+      effect  = "Allow"
+      actions = ["kms:*"]
 
-    principals {
-      type        = "AWS"
-      identifiers = [var.kms_admin_principal_arn]
+      principals {
+        type        = "AWS"
+        identifiers = [var.kms_admin_principal_arn]
+      }
+
+      resources = ["*"]
     }
-
-    resources = ["*"]
   }
 
   # Delegate key usage authorization to IAM policies within this account.
@@ -53,7 +60,7 @@ data "aws_iam_policy_document" "key_policy" {
     condition {
       test     = "StringEquals"
       variable = "aws:PrincipalAccount"
-      values   = [data.aws_caller_identity.current.account_id]
+      values   = [local.account_id]
     }
   }
 
@@ -95,7 +102,7 @@ data "aws_iam_policy_document" "key_policy" {
 resource "aws_kms_key" "siem" {
   description             = "ELK SIEM KMS key (${var.environment})"
   enable_key_rotation     = true
-  deletion_window_in_days = 30
+  deletion_window_in_days = var.deletion_window_in_days
   policy                  = data.aws_iam_policy_document.key_policy.json
 
   tags = merge(var.tags, {

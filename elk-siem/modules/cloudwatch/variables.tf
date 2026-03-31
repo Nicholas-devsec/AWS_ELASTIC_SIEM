@@ -23,6 +23,12 @@ variable "vpc_flow_bucket_name" {
   description = "S3 bucket name for VPC flow logs."
 }
 
+variable "force_destroy_buckets" {
+  type        = bool
+  description = "When true, allows Terraform to destroy S3 buckets even if they contain objects/versions."
+  default     = false
+}
+
 variable "kms_key_arn" {
   type        = string
   description = "KMS key ARN used for SSE-KMS on the flow logs bucket."

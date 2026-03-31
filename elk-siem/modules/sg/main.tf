@@ -1,5 +1,5 @@
 resource "aws_security_group" "nlb" {
-  name        = "sg-nlb-${var.environment}"
+  name        = "siem-nlb-${var.environment}"
   description = "NLB security group (Beats ingest)."
   vpc_id      = var.vpc_id
 
@@ -8,7 +8,7 @@ resource "aws_security_group" "nlb" {
     from_port   = 5044
     to_port     = 5044
     protocol    = "tcp"
-    cidr_blocks = var.beats_source_cidrs
+    cidr_blocks = distinct(concat(var.beats_source_cidrs, var.beats_allow_vpc_cidr ? [var.vpc_cidr] : []))
   }
 
   egress {
@@ -24,7 +24,7 @@ resource "aws_security_group" "nlb" {
 }
 
 resource "aws_security_group" "logstash" {
-  name        = "sg-logstash-${var.environment}"
+  name        = "siem-logstash-${var.environment}"
   description = "Logstash nodes."
   vpc_id      = var.vpc_id
 
@@ -49,7 +49,7 @@ resource "aws_security_group" "logstash" {
 }
 
 resource "aws_security_group" "alb" {
-  name        = "sg-alb-${var.environment}"
+  name        = "siem-alb-${var.environment}"
   description = "Reserved for future public Kibana ALB."
   vpc_id      = var.vpc_id
 
@@ -69,7 +69,7 @@ resource "aws_security_group" "alb" {
 }
 
 resource "aws_security_group" "kibana" {
-  name        = "sg-kibana-${var.environment}"
+  name        = "siem-kibana-${var.environment}"
   description = "Kibana (private access)."
   vpc_id      = var.vpc_id
 
@@ -94,7 +94,7 @@ resource "aws_security_group" "kibana" {
 }
 
 resource "aws_security_group" "elasticsearch" {
-  name        = "sg-elasticsearch-${var.environment}"
+  name        = "siem-elasticsearch-${var.environment}"
   description = "Elasticsearch cluster nodes."
   vpc_id      = var.vpc_id
 
@@ -141,4 +141,3 @@ resource "aws_security_group" "elasticsearch" {
     Name = "sg_elasticsearch"
   })
 }
-

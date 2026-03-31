@@ -13,6 +13,12 @@ variable "snapshot_bucket_name" {
   description = "Snapshot bucket name."
 }
 
+variable "force_destroy_buckets" {
+  type        = bool
+  description = "When true, allows Terraform to destroy S3 buckets even if they contain objects/versions."
+  default     = false
+}
+
 variable "kms_key_arn" {
   type        = string
   description = "KMS key ARN to use for SSE-KMS."
@@ -38,4 +44,3 @@ variable "tags" {
   description = "Common tags."
   default     = {}
 }
-

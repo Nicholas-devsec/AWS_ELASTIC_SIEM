@@ -1,0 +1,72 @@
+#!/bin/bash
+set -euo pipefail
+
+AWS_REGION="${aws_region}"
+ENVIRONMENT="${environment}"
+LOGSTASH_HOST="${logstash_host}"
+LOGSTASH_PORT="${logstash_port}"
+
+if command -v apt-get >/dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -y
+  apt-get install -y ca-certificates curl gnupg apt-transport-https
+
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL https://artifacts.elastic.co/GPG-KEY-elasticsearch | gpg --dearmor -o /etc/apt/keyrings/elastic.gpg
+  chmod 0644 /etc/apt/keyrings/elastic.gpg
+
+  echo "deb [signed-by=/etc/apt/keyrings/elastic.gpg] https://artifacts.elastic.co/packages/8.x/apt stable main" >/etc/apt/sources.list.d/elastic-8.x.list
+  apt-get update -y
+  apt-get install -y filebeat
+elif command -v dnf >/dev/null 2>&1; then
+  dnf -y install curl ca-certificates gnupg2
+  rpm --import https://artifacts.elastic.co/GPG-KEY-elasticsearch
+  cat >/etc/yum.repos.d/elastic-8.x.repo <<'REPO'
+[elastic-8.x]
+name=Elastic repository for 8.x packages
+baseurl=https://artifacts.elastic.co/packages/8.x/yum
+gpgcheck=1
+gpgkey=https://artifacts.elastic.co/GPG-KEY-elasticsearch
+enabled=1
+autorefresh=1
+type=rpm-md
+REPO
+  dnf -y install filebeat
+else
+  echo "Unsupported OS (no apt-get or dnf found)" >&2
+  exit 1
+fi
+
+cat >/etc/filebeat/filebeat.yml <<EOF
+filebeat.inputs:
+  - type: filestream
+    id: syslog
+    enabled: true
+	    paths:
+	      - /var/log/syslog
+	      - /var/log/auth.log
+	      - /var/log/cloud-init-output.log
+	      - /var/log/siem-demo.log
+
+processors:
+  - add_fields:
+      target: ''
+      fields:
+        type: syslog
+        environment: "${environment}"
+
+output.logstash:
+  hosts: ["${logstash_host}:${logstash_port}"]
+  ssl.enabled: false
+
+logging.level: info
+EOF
+
+systemctl enable filebeat
+systemctl restart filebeat
+
+# Demo log generation
+for i in $(seq 1 20); do
+  logger "beats-demo: hello from ${environment} (#$i)"
+  sleep 3
+done
