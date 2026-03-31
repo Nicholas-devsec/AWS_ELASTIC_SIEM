@@ -26,7 +26,7 @@ Kibana is not in the ingest path; it reads from Elasticsearch.
 
 - **TLS where it matters most**
   - Elasticsearch runs TLS for HTTP (`:9200`) and transport (`:9300`).
-  - The Beats hop is **plain TCP inside the VPC** in the current config. We originally tried Beats TLS, but the cert/key bootstrapping wasn’t reliable and Logstash crash-looped. For a lab, reliability > perfection.
+  - Beats → Logstash is **plain TCP inside the VPC** in this lab build.
 
 - **Secrets are pulled at boot**
   - Instances use IAM instance profiles + SSM, and fetch Secrets Manager values during user-data.
@@ -35,6 +35,12 @@ Kibana is not in the ingest path; it reads from Elasticsearch.
 - **Backups are real (and cheap over time)**
   - Elasticsearch snapshots go to a dedicated S3 bucket with SSE-KMS + versioning.
   - Lifecycle defaults: **Glacier after 30 days**, delete after **365 days**.
+
+## Lab vs prod (what I’d change)
+
+- **Beats transport**: enable mTLS (Beats/Agent → Logstash) and validate the chain, instead of plain TCP.
+- **Kibana access**: put Kibana behind ALB + WAF with an ACM cert + DNS, rather than relying on port-forwarding.
+- **Host hardening**: CIS baseline, tighter egress controls, patching strategy, and stricter IAM scoping.
 
 ## Repo layout
 
