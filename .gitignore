@@ -13,10 +13,10 @@ override.tf.json
 .terraformrc
 terraform.rc
 
-# Local plugin socket dir used in restricted environments
+## Local plugin socket dir used in restricted environments
 **/.terraform-plugin-sockets/
 
-# Sensitive files / keys
+## Sensitive files / keys
 *.pem
 *.key
 *.p12
@@ -44,3 +44,8 @@ Thumbs.db
 
 # Codex CLI
 .codex/
+
+# Local docs / codex
+IAC_SUMMARY.md
+SIEM_ARCHITECTURE_PLAN.md
+.codex
