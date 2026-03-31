@@ -13,7 +13,7 @@ override.tf.json
 .terraformrc
 terraform.rc
 
-# Local plugin socket dir used in restricted environments
+## Local plugin socket dir used in restricted environments
 **/.terraform-plugin-sockets/
 
 # Sensitive files / keys
