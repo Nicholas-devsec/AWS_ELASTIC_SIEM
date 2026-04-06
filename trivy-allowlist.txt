@@ -11,4 +11,3 @@ AVD-AWS-0104
 # Public subnets map public IPs (intentional)
 AWS-0164
 AVD-AWS-0164
-
